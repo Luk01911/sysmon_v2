@@ -40,13 +40,14 @@ jobs:
           exit 1
         fi
         
-        # Send clean SIGINT shutdown signal
         kill -2 $SERVER_PID
         wait $SERVER_PID || true
 
-    - name: Run Valgrind leak analysis
+    - name: Run Valgrind leak analysis (ASan Disabled)
       run: |
-        make clean && make
+        make clean
+        # Override CFLAGS to remove -fsanitize=address so Valgrind can run safely
+        make CFLAGS="-Wall -Wextra -Werror -pedantic -std=c99 -Iinclude -g -pthread"
         valgrind --leak-check=full --error-exitcode=1 ./build/sysmon_server &
         VALGRIND_PID=$!
         sleep 2
