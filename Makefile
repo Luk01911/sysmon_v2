@@ -1,15 +1,13 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Iinclude -g -fsanitize=address -pthread
-SRC = src/arena.c src/metrics.c src/server.c src/main.c
-TARGET = build/sysmon_server
+CFLAGS = -Wall -Wextra -O2 -std=c99 -Iinclude -pthread
+SRC = $(wildcard src/*.c)
+OBJ = $(SRC:.c=.o)
+TARGET = sysmon
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-@mkdir -p build
-$(CC) $(CFLAGS) $^ -o $@
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-rm -rf build
-
-.PHONY: all clean
+	rm -f $(OBJ) $(TARGET)
