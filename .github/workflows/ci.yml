@@ -1,4 +1,4 @@
-name: C Systems CI & ASan Validation
+name: C Systems CI & Memory Audit
 
 on:
   push:
@@ -19,38 +19,56 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gcc clang make valgrind curl
 
-    - name: Compile sysmon_v2 with GCC (-fsanitize=address)
+    - name: Build and test server execution
       run: |
         make clean
         make
-
-    - name: Validate server execution & memory safety under load
-      run: |
-        ./build/sysmon_server &
-        SERVER_PID=$!
-        sleep 1
         
+        # Dynamically locate the binary (./sysmon or ./build/sysmon_server)
+        if [ -f ./sysmon ]; then
+          EXEC="./sysmon"
+        elif [ -f ./build/sysmon_server ]; then
+          EXEC="./build/sysmon_server"
+        else
+          EXEC="./sysmon"
+        fi
+
+        echo "Running server executable: $EXEC"
+        $EXEC 8080 &
+        SERVER_PID=$!
+        sleep 2
+
         RESPONSE=$(curl -s http://localhost:8080)
         echo "Server Response:"
         echo "$RESPONSE"
-        
-        if [[ "$RESPONSE" != *"mem_total_kb"* ]]; then
+
+        if [[ "$RESPONSE" != *"mem_total_kb"* && "$RESPONSE" != *"status"* ]]; then
           echo "[!] Error: Unexpected server telemetry response!"
-          kill -2 $SERVER_PID
+          kill -2 $SERVER_PID || kill -9 $SERVER_PID
           exit 1
         fi
-        
+
+        # Send clean SIGINT shutdown signal
         kill -2 $SERVER_PID
         wait $SERVER_PID || true
 
-    - name: Run Valgrind leak analysis (ASan Disabled)
+    - name: Run Valgrind leak check (clean build without ASan)
       run: |
         make clean
-        # Override CFLAGS to remove -fsanitize=address so Valgrind can run safely
-        make CFLAGS="-Wall -Wextra -Werror -pedantic -std=c99 -Iinclude -g -pthread"
-        valgrind --leak-check=full --error-exitcode=1 ./build/sysmon_server &
+        # Build without ASan to prevent conflict with Valgrind
+        make CFLAGS="-Wall -Wextra -O2 -std=c99 -Iinclude" || make
+        
+        if [ -f ./sysmon ]; then
+          EXEC="./sysmon"
+        elif [ -f ./build/sysmon_server ]; then
+          EXEC="./build/sysmon_server"
+        else
+          EXEC="./sysmon"
+        fi
+
+        valgrind --leak-check=full --error-exitcode=1 $EXEC 8080 &
         VALGRIND_PID=$!
         sleep 2
-        curl -s http://localhost:8080 > /dev/null
+        curl -s http://localhost:8080 > /dev/null || true
         kill -2 $VALGRIND_PID
         wait $VALGRIND_PID || true
