@@ -1,0 +1,55 @@
+name: C Systems CI & ASan Validation
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-sanitize:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies & Valgrind
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc clang make valgrind curl
+
+    - name: Compile sysmon_v2 with GCC (-fsanitize=address)
+      run: |
+        make clean
+        make
+
+    - name: Validate server execution & memory safety under load
+      run: |
+        ./build/sysmon_server &
+        SERVER_PID=$!
+        sleep 1
+        
+        RESPONSE=$(curl -s http://localhost:8080)
+        echo "Server Response:"
+        echo "$RESPONSE"
+        
+        if [[ "$RESPONSE" != *"mem_total_kb"* ]]; then
+          echo "[!] Error: Unexpected server telemetry response!"
+          kill -2 $SERVER_PID
+          exit 1
+        fi
+        
+        # Send clean SIGINT shutdown signal
+        kill -2 $SERVER_PID
+        wait $SERVER_PID || true
+
+    - name: Run Valgrind leak analysis
+      run: |
+        make clean && make
+        valgrind --leak-check=full --error-exitcode=1 ./build/sysmon_server &
+        VALGRIND_PID=$!
+        sleep 2
+        curl -s http://localhost:8080 > /dev/null
+        kill -2 $VALGRIND_PID
+        wait $VALGRIND_PID || true
